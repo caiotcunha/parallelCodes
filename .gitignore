@@ -1,0 +1,8 @@
+*.pgm
+*.o
+*.jpg
+*.png
+*.bmp
+*.tiff
+*.pdf
+*exec
