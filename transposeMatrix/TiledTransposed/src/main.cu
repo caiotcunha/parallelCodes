@@ -17,6 +17,7 @@ __global__ void transposeInPlaceTiled(unsigned char *data, int width, int height
 {
   __shared__ unsigned char tileA[TILE_DIM][TILE_DIM + 1];
   __shared__ unsigned char tileB[TILE_DIM][TILE_DIM + 1];
+  
   int bx = blockIdx.x;
   int by = blockIdx.y;
   int tx = threadIdx.x;
@@ -25,47 +26,75 @@ __global__ void transposeInPlaceTiled(unsigned char *data, int width, int height
   // Diagonal tile: transpose in-place
   if (bx == by) {
     // Load tile into shared memory
+
     for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS) {
       int row = by * TILE_DIM + ty + i;
-      int col = bx * TILE_DIM + tx;
+      int col = bx * TILE_DIM + tx*4;
       if (row < height && col < width) {
-        unsigned char *rowPtr = (unsigned char *)((char*)data + row * pitch);
-        tileA[ty + i][tx] = rowPtr[col];
+        uchar4 *rowPtr = (uchar4 *)((unsigned char*)data + row * pitch);
+        uchar4 pixels = rowPtr[col / 4];
+        tileA[ty + i][tx*4] = pixels.x;
+        tileA[ty + i][tx*4+1] = pixels.y;
+        tileA[ty + i][tx*4+2] = pixels.z;
+        tileA[ty + i][tx*4+3] = pixels.w;
       }
     }
+
 
     __syncthreads();
 
     // Write transposed back
+
     for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS) {
       int row = by * TILE_DIM + ty + i;
-      int col = bx * TILE_DIM + tx;
+      int col = bx * TILE_DIM + tx*4;
       if (row < height && col < width) {
-        unsigned char *rowPtr = (unsigned char *)((char*)data + row * pitch);
-        rowPtr[col] = tileA[tx][ty + i];
+        uchar4 pixels_out;
+        pixels_out.x = tileA[tx * 4][ty + i];
+        pixels_out.y = tileA[tx * 4 + 1][ty + i];
+        pixels_out.z = tileA[tx * 4 + 2][ty + i];
+        pixels_out.w = tileA[tx * 4 + 3][ty + i];
+
+        uchar4 *rowPtr_out = (uchar4 *)((unsigned char*)data + row * pitch);
+        rowPtr_out[col / 4] = pixels_out;
       }
     }
+
   }
   // Off-diagonal tiles: swap tile (bx,by) with transposed tile (by,bx)
   else if (bx < by) {
     // Load A = tile(bx,by) and B = tile(by,bx)
     for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS) {
       int rowA = by * TILE_DIM + ty + i;
-      int colA = bx * TILE_DIM + tx;
+      int colA = bx * TILE_DIM + tx*4;
       if (rowA < height && colA < width) {
-        unsigned char *rowPtrA = (unsigned char *)((char*)data + rowA * pitch);
-        tileA[ty + i][tx] = rowPtrA[colA];
+        uchar4 *rowPtrA = (uchar4 *)((char*)data + rowA * pitch);
+        uchar4 pixels = rowPtrA[colA / 4];
+        tileA[ty + i][tx*4] = pixels.x;
+        tileA[ty + i][tx*4+1] = pixels.y;
+        tileA[ty + i][tx*4+2] = pixels.z;
+        tileA[ty + i][tx*4+3] = pixels.w;
       } else {
-        tileA[ty + i][tx] = 0;
+        tileA[ty + i][tx*4] = 0;
+        tileA[ty + i][tx*4+1] = 0;
+        tileA[ty + i][tx*4+2] = 0;
+        tileA[ty + i][tx*4+3] = 0;
       }
 
       int rowB = bx * TILE_DIM + ty + i;
-      int colB = by * TILE_DIM + tx;
+      int colB = by * TILE_DIM + tx*4;
       if (rowB < height && colB < width) {
-        unsigned char *rowPtrB = (unsigned char *)((char*)data + rowB * pitch);
-        tileB[ty + i][tx] = rowPtrB[colB];
+        uchar4 *rowPtrB = (uchar4 *)((char*)data + rowB * pitch);
+        uchar4 pixels = rowPtrB[colB / 4];
+        tileB[ty + i][tx*4] = pixels.x;
+        tileB[ty + i][tx*4+1] = pixels.y;
+        tileB[ty + i][tx*4+2] = pixels.z;
+        tileB[ty + i][tx*4+3] = pixels.w;
       } else {
-        tileB[ty + i][tx] = 0;
+        tileB[ty + i][tx*4] = 0;
+        tileB[ty + i][tx*4+1] = 0;
+        tileB[ty + i][tx*4+2] = 0;
+        tileB[ty + i][tx*4+3] = 0;
       }
     }
 
@@ -74,19 +103,29 @@ __global__ void transposeInPlaceTiled(unsigned char *data, int width, int height
     // Write transposed: A <- transpose(B), B <- transpose(A)
     for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS) {
       int rowA = by * TILE_DIM + ty + i;
-      int colA = bx * TILE_DIM + tx;
+      int colA = bx * TILE_DIM + tx*4;
       // write into A region from tileB transposed
       if (rowA < height && colA < width) {
-        unsigned char *rowPtrA = (unsigned char *)((char*)data + rowA * pitch);
-        rowPtrA[colA] = tileB[tx][ty + i];
+        uchar4 pixels_out;
+        pixels_out.x = tileB[tx * 4][ty + i];
+        pixels_out.y = tileB[tx * 4 + 1][ty + i];
+        pixels_out.z = tileB[tx * 4 + 2][ty + i];
+        pixels_out.w = tileB[tx * 4 + 3][ty + i];
+        uchar4 *rowPtrA = (uchar4 *)((char*)data + rowA * pitch);
+        rowPtrA[colA/4] = pixels_out;
       }
 
       int rowB = bx * TILE_DIM + ty + i;
-      int colB = by * TILE_DIM + tx;
+      int colB = by * TILE_DIM + tx*4;
       // write into B region from tileA transposed
       if (rowB < height && colB < width) {
-        unsigned char *rowPtrB = (unsigned char *)((char*)data + rowB * pitch);
-        rowPtrB[colB] = tileA[tx][ty + i];
+        uchar4 pixels_out;
+        pixels_out.x = tileA[tx * 4][ty + i];
+        pixels_out.y = tileA[tx * 4 + 1][ty + i];
+        pixels_out.z = tileA[tx * 4 + 2][ty + i];
+        pixels_out.w = tileA[tx * 4 + 3][ty + i];
+        uchar4 *rowPtrB = (uchar4 *)((char*)data + rowB * pitch);
+        rowPtrB[colB/4] = pixels_out;
       }
     }
   }
@@ -212,14 +251,17 @@ int main(int argc, char** argv) {
     cudaDeviceSynchronize();
 
     // Using OpenCV to compute the transposed on CPU for correctness check
-    cv::Mat opencvTransposed;
-    cv::transpose(marker_img, opencvTransposed);
+    if(usePGMLoader) {
+      printf("Using custom PGM loader, skipping OpenCV transpose for correctness check\n");
+      cv::Mat opencvTransposed;
+      cv::transpose(marker_img, opencvTransposed);
+    }
 
     
     auto tStart = std::chrono::high_resolution_clock::now();
 
     // Configure launch dimensions and run in-place transpose with coalesced reads
-    dim3 dimBlock(TILE_DIM, BLOCK_ROWS);
+    dim3 dimBlock(TILE_DIM/4, BLOCK_ROWS);
     dim3 dimGrid((size + TILE_DIM - 1) / TILE_DIM, (size + TILE_DIM - 1) / TILE_DIM);
     transposeInPlaceTiled<<<dimGrid, dimBlock>>>(d_marker, size, size, pitchMarker);
     cudaError_t kernErr = cudaGetLastError();
@@ -234,25 +276,37 @@ int main(int argc, char** argv) {
     auto ms_int = std::chrono::duration_cast<std::chrono::milliseconds>(tEnd - tStart);
     printf("Time to transpose: %ld ms\n", ms_int.count());
     
-    cv::Mat output_img(cv::Size(size, size), CV_8UC1);
-    cudaMemcpy2D(output_img.data, output_img.step, 
-      d_marker, pitchMarker, 
-      size * sizeof(unsigned char), size, 
-      cudaMemcpyDeviceToHost);
+    
+    if(!usePGMLoader){
+      //  Only check when using OpenCV loader
+      cv::Mat opencvTransposed;
+      cv::transpose(marker_img, opencvTransposed);
+      cv::Mat diff;
+      // Difference between OpenCV and CUDA results
+      cv::Mat output_img(cv::Size(size, size), CV_8UC1);
+      cudaMemcpy2D(output_img.data, output_img.step, 
+        d_marker, pitchMarker, 
+        size * sizeof(unsigned char), size, 
+        cudaMemcpyDeviceToHost);
+      cv::absdiff(opencvTransposed, output_img, diff);
+      cv::imwrite(output_filename, output_img);
       
-    cv::Mat diff;
-    // Difference between OpenCV and CUDA results
-    cv::absdiff(opencvTransposed, output_img, diff);
-    //cv::imwrite(output_filename, output_img);
-
-    int erros = cv::countNonZero(diff);
-
-    if (erros == 0) {
+      int erros = cv::countNonZero(diff);
+      
+      if (erros == 0) {
         printf("Success\n");
-    } else {
+      } else {
         printf("Failed: %d pixels are different\n", erros);
+      }
     }
-
+    else{
+      cv::Mat output_img(cv::Size(size, size), CV_8UC1);
+      cudaMemcpy2D(output_img.data, output_img.step, 
+        d_marker, pitchMarker, 
+        size * sizeof(unsigned char), size, 
+        cudaMemcpyDeviceToHost);
+      //cv::imwrite(output_filename, output_img);
+    }
     cudaFree(d_marker);
     
     return 0;
