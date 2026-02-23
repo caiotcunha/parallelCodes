@@ -73,14 +73,24 @@ unsigned char* loadPGMToDevice(char* filename, int& width, int &height, size_t &
 
   // here maybe?
   uchar* buffer = (unsigned char*) malloc(width*sizeof(uchar)+32);
+  uchar* rotatedBuffer = (unsigned char*) malloc(width*sizeof(uchar)+32); 
   for(i=0; i<height; i++) {
     if(fread(buffer, sizeof(unsigned char), width, imagem) < width) {
       printf("Falha na leitura (iteracao=%d)\n", i);
       exit(1);
     }
+
+    // Rotating buffer
+    int shift = i;
+    int cols = width;
+    for (int j = 0; j < width; ++j) {
+        int coluna_origem = (j - shift + cols) % cols;
+        rotatedBuffer[j] = buffer[coluna_origem];
+    }
     
     d_imagem_row = (uchar*)((char*)d_imagem + i*pitch);
-    err = cudaMemcpy(d_imagem_row, buffer, width*sizeof(unsigned char), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(d_imagem_row, rotatedBuffer, width*sizeof(unsigned char), cudaMemcpyHostToDevice);
+    //err = cudaMemcpy(d_imagem_row, buffer, width*sizeof(unsigned char), cudaMemcpyHostToDevice);
     if(err) {
       printf("Error: %s\n", cudaGetErrorString(err));
       exit(1);
@@ -132,6 +142,7 @@ int main(int argc, char** argv) {
 	  // Usamos o carregamento customizado de pgm
     auto tStart = std::chrono::high_resolution_clock::now();
     if(usePGMLoader) {
+      printf("Usando carregamento customizado de PGM\n");
       d_marker = loadPGMToDevice(marker_filename, size, height, pitchMarker);
     }
     // Usamos o opencv
